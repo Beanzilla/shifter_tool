@@ -18,6 +18,16 @@ To pull the node, right-click the face instead.
 The source code of this project is licensed under the LGPL v3 (or later,)
 as stated in the source code's comments.
 
+## Changes
+
+### Beanzilla ([ApolloX](https://content.minetest.net/users/ApolloX/)), July 31, 2021 to Current Date
+
+- [x] Added Shifter modes. ("shift" or "teleport")
+- [x] Allowed Shifter to switch between the two modes. (Left click + Shift key, or Right click + Shift key)
+- [x] Kept original shift code so the mod doesn't loose it's original capibility.
+- [x] Added a different texture to indicate tool is in teleport or original shift modes (includes a chat message).
+- [ ] Added teleport code where the tool essentially stores the node till request to "release" ("re-materialize").
+
 ### Sounds
 
 The sounds are not by me. See the end of the Attribution section.
@@ -57,6 +67,8 @@ I couldn't find a copyright notice, but here is the notice in Mesecons'
 [COPYING.txt][11]:
 
     Copyright (C) 2011-2016 Mesecons Mod Developer Team and contributors
+
+The blue color was created custom.
 
 ### Pushing and pulling sounds
 

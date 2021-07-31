@@ -23,6 +23,9 @@ local S = minetest.get_translator("shifter_tool")
 -- tool breaks.
 local WEAR_PER_USE = 328 -- 200 uses.
 
+-- The inital "mode" this tool starts in ("shift" or "teleport")
+local DEFAULT_MODE = "shift"
+
 -- Tries to tell whether an ObjectRef represents a real connected player.
 local function object_is_player(object)
 	if not object then return false end
@@ -41,68 +44,109 @@ end
 -- Tries to shift the node at the position in the direction for the user. The
 -- direction should be one unit long and parallel to an axis. The user will be
 -- messaged if the shift didn't occur. The return value is whether it did.
-local function shift_node(pos, move_dir, user)
-	local name = user and user:get_player_name() or ""
-	-- Whether or not the user is a real player:
-	local is_player = object_is_player(user)
-	if vector.length(move_dir) ~= 1 then
-		-- A direction could not be determined due to where they are.
-		if is_player then
-			minetest.chat_send_player(name,
-				S("You cannot shift the node due to your " ..
-				"current position/orientation."))
+local function shift_node(pos, move_dir, user, mode)
+	if mode == "shift" then -- Normal shift operation
+		local name = user and user:get_player_name() or ""
+		-- Whether or not the user is a real player:
+		local is_player = object_is_player(user)
+		if vector.length(move_dir) ~= 1 then
+			-- A direction could not be determined due to where they are.
+			if is_player then
+				minetest.chat_send_player(name,
+					S("You cannot shift the node due to your " ..
+					"current position/orientation."))
+			end
+			return false
 		end
-		return false
-	end
-	-- The name changed to conform to the conventions of mvps_push:
-	local shifter_name = is_player and name or "$unknown"
-	-- MineClone requires this position that is where the piston would be:
-	local piston_pos = nil
-	-- Detect Mineclone using the presence of mcl_get_neighbors:
-	if mesecon.mcl_get_neighbors then
-		piston_pos = vector.subtract(pos, move_dir)
-	end
-	-- Try to push the node:
-	local shifted, stack, oldstack =
-		mesecon.mvps_push(pos, move_dir, 1, shifter_name, piston_pos)
-	-- Check that the shift actually happened:
-	shifted = shifted and minetest.get_node(pos).name == "air"
-	if shifted then
-		mesecon.mvps_move_objects(pos, move_dir, oldstack)
-	elseif is_player then
-		-- On failure, stack here may represent the reason for failure:
-		if stack == "protected" then
-			minetest.chat_send_player(name,
-				S("Nodes cannot be shifted to/from " ..
-				"protected positions."))
-		else
-			minetest.chat_send_player(name,
-				S("The node could not be shifted."))
+		-- The name changed to conform to the conventions of mvps_push:
+		local shifter_name = is_player and name or "$unknown"
+		-- MineClone requires this position that is where the piston would be:
+		local piston_pos = nil
+		-- Detect Mineclone using the presence of mcl_get_neighbors:
+		if mesecon.mcl_get_neighbors then
+			piston_pos = vector.subtract(pos, move_dir)
 		end
+		-- Try to push the node:
+		local shifted, stack, oldstack =
+			mesecon.mvps_push(pos, move_dir, 1, shifter_name, piston_pos)
+		-- Check that the shift actually happened:
+		shifted = shifted and minetest.get_node(pos).name == "air"
+		if shifted then
+			mesecon.mvps_move_objects(pos, move_dir, oldstack)
+		elseif is_player then
+			-- On failure, stack here may represent the reason for failure:
+			if stack == "protected" then
+				minetest.chat_send_player(name,
+					S("Nodes cannot be shifted to/from " ..
+					"protected positions."))
+			else
+				minetest.chat_send_player(name,
+					S("The node could not be shifted."))
+			end
+		end
+		return shifted
+	else
+		local pname = user:get_player_name()
+		minetest.chat_send_player(pname, S("Shifter not configured to use mode '%s'"):format(mode))
+		return true
 	end
-	return shifted
 end
 
 -- Do the interaction. If reverse is true, the action pulling (otherwise it's
 -- pushing.)
 local function interact(tool, user, pointed_thing, reverse)
+	local meta_updated = false
 	if pointed_thing.type == "node" then
 		local name = user and user:get_player_name() or ""
 		local use_pos = pointed_thing.under
 		local move_dir = vector.subtract(use_pos, pointed_thing.above)
+		local meta = minetest.deserialize(tool:get_metadata())
+		if meta == nil then
+			meta = {}
+			meta_updated = true
+		end
+		if meta.shift_mode == nil then
+			meta.shift_mode = DEFAULT_MODE
+			meta_updated = true
+		end
 		if reverse then move_dir = vector.multiply(move_dir, -1) end
-		if shift_node(use_pos, move_dir, user) then
+		if shift_node(use_pos, move_dir, user, meta.shift_mode) then
 			local sound = reverse and "shifter_tool_pull" or
 				"shifter_tool_push"
 			minetest.sound_play(sound, {
 				pos = use_pos,
 				gain = 0.2,
 			}, true)
-			if not minetest.is_creative_enabled(name) then
+			-- Only remove wear if not in creative, and not the server owner
+			if not minetest.is_creative_enabled(name) and not minetest.check_player_privs(name, {server = true}) then
 				tool:add_wear(WEAR_PER_USE)
 			end
 		end
 	end
+	if meta_updated then
+		tool:set_metadata(minetest.serialize(meta))
+	end
+	return tool
+end
+
+local function tool_setmode(user, tool)
+	local pname = user:get_player_name()
+	local meta = minetest.deserialize(tool:get_metadata())
+	if meta == nil then
+		meta = {}
+		meta.save_block = nil -- Initialize the node we have stored as nil
+	end	
+	if meta.shift_mode == nil then
+		meta.shift_mode = DEFAULT_MODE
+	elseif meta.shift_mode == "shift" then
+		meta.shift_mode = "teleport"
+		tool:set_name("shifter_tool:shifter_teleport")
+	else
+		meta.shift_mode = "shift"
+		tool:set_name("shifter_tool:shifter")
+	end
+	minetest.chat_send_player(pname, S("Shifter changed mode to '%s'"):format(meta.shift_mode))
+	tool:set_metadata(minetest.serialize(meta))
 	return tool
 end
 
@@ -112,10 +156,45 @@ minetest.register_tool("shifter_tool:shifter", {
 	_mcl_toollike_wield = true,
 	node_dig_prediction = "",
 	on_place = function(tool, user, pointed_thing)
-		return interact(tool, user, pointed_thing, true)
+		local keys = user:get_player_control()
+		if keys.sneak then -- If the player is sneaking and using then change mode
+			return tool_setmode(user, tool)
+		else
+			return interact(tool, user, pointed_thing, true)
+		end
 	end,
 	on_use = function(tool, user, pointed_thing)
-		return interact(tool, user, pointed_thing, false)
+		local keys = user:get_player_control()
+		if keys.sneak then -- If the player is sneaking and using then change mode
+			return tool_setmode(user, tool)
+		else
+			return interact(tool, user, pointed_thing, false)
+		end
+	end,
+	after_use = function() return nil end, -- Do nothing.
+})
+
+-- The tool in teleport mode
+minetest.register_tool("shifter_tool:shifter_teleport", {
+	description = S("Shifter"),
+	inventory_image = "shifter_tool_shifter_teleport.png",
+	_mcl_toollike_wield = true,
+	node_dig_prediction = "",
+	on_place = function(tool, user, pointed_thing)
+		local keys = user:get_player_control()
+		if keys.sneak then -- If the player is sneaking and using then change mode
+			return tool_setmode(user, tool)
+		else
+			return interact(tool, user, pointed_thing, true)
+		end
+	end,
+	on_use = function(tool, user, pointed_thing)
+		local keys = user:get_player_control()
+		if keys.sneak then -- If the player is sneaking and using then change mode
+			return tool_setmode(user, tool)
+		else
+			return interact(tool, user, pointed_thing, false)
+		end
 	end,
 	after_use = function() return nil end, -- Do nothing.
 })
