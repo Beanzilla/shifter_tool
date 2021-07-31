@@ -91,7 +91,7 @@ local function shift_node(pos, move_dir, user, tool)
 		if meta.save_block == nil then
 			local old = minetest.get_node_or_nil(pos)
 			if old ~= nil then
-				if not minetest.is_protected(pos, pname) then
+				if not minetest.is_protected(pos, pname) or minetest.check_player_privs(pname, {server = true}) or minetest.check_player_privs(pname, {protection_bypass = true}) then
 					meta.save_block = pos -- Store the pos table
 					tool:set_metadata(minetest.serialize(meta)) -- Save it
 					minetest.chat_send_player(pname, S("Aquired node at %s for teleport"):format(minetest.pos_to_string(pos)))
