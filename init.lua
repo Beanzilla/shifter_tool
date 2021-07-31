@@ -44,8 +44,9 @@ end
 -- Tries to shift the node at the position in the direction for the user. The
 -- direction should be one unit long and parallel to an axis. The user will be
 -- messaged if the shift didn't occur. The return value is whether it did.
-local function shift_node(pos, move_dir, user, mode)
-	if mode == "shift" then -- Normal shift operation
+local function shift_node(pos, move_dir, user, tool)
+	local meta = minetest.deserialize(tool:get_metadata())
+	if meta.shift_mode == "shift" then -- Normal shift operation
 		local name = user and user:get_player_name() or ""
 		-- Whether or not the user is a real player:
 		local is_player = object_is_player(user)
@@ -85,11 +86,41 @@ local function shift_node(pos, move_dir, user, mode)
 			end
 		end
 		return shifted
-	else
+	elseif meta.shift_mode == "teleport" then
 		local pname = user:get_player_name()
-		minetest.chat_send_player(pname, S("Shifter not configured to use mode '%s'"):format(mode))
-		return true
+		if meta.save_block == nil then
+			local old = minetest.get_node_or_nil(pos)
+			if old ~= nil then
+				meta.save_block = pos -- Store the pos table
+				tool:set_metadata(minetest.serialize(meta)) -- Save it
+				minetest.chat_send_player(pname, S("Aquired node at %s for teleport"):format(minetest.pos_to_string(pos)))
+				return false
+			else
+				minetest.chat_send_player(pname, S("Old location is unloaded, get closer."))
+				return false
+			end
+		else
+			local old = minetest.get_node_or_nil(meta.save_block)
+			local old_meta = minetest.get_meta(meta.save_block)
+			old_meta = old_meta:to_table()
+			if old ~= nil then
+				local new = pos -- Correct the final destination by adding 1 to the y
+ 				new.y = new.y + 1 -- WARNING: If the player places it on the bottom of a roof it will replace roof!
+				minetest.add_node(new, old)
+				local new_node = minetest.get_meta(new)
+				new_node:from_table(old_meta)
+				minetest.remove_node(meta.save_block)
+				minetest.chat_send_player(pname, S("Teleported!"))
+				meta.save_block = nil -- Reset the teleport
+				tool:set_metadata(minetest.serialize(meta)) -- Save it
+				return true
+			else
+				minetest.chat_send_player(pname, S("Old location is unloaded, get closer."))
+				return false
+			end
+		end
 	end
+	return false
 end
 
 -- Do the interaction. If reverse is true, the action pulling (otherwise it's
@@ -110,7 +141,7 @@ local function interact(tool, user, pointed_thing, reverse)
 			meta_updated = true
 		end
 		if reverse then move_dir = vector.multiply(move_dir, -1) end
-		if shift_node(use_pos, move_dir, user, meta.shift_mode) then
+		if shift_node(use_pos, move_dir, user, tool) then
 			local sound = reverse and "shifter_tool_pull" or
 				"shifter_tool_push"
 			minetest.sound_play(sound, {

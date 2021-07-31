@@ -26,7 +26,7 @@ as stated in the source code's comments.
 - [x] Allowed Shifter to switch between the two modes. (Left click + Shift key, or Right click + Shift key)
 - [x] Kept original shift code so the mod doesn't loose it's original capibility.
 - [x] Added a different texture to indicate tool is in teleport or original shift modes (includes a chat message).
-- [ ] Added teleport code where the tool essentially stores the node till request to "release" ("re-materialize").
+- [x] Added teleport code where the tool essentially stores the node till request to "release" ("re-materialize").
 
 ### Sounds
 
