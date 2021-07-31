@@ -91,12 +91,17 @@ local function shift_node(pos, move_dir, user, tool)
 		if meta.save_block == nil then
 			local old = minetest.get_node_or_nil(pos)
 			if old ~= nil then
-				meta.save_block = pos -- Store the pos table
-				tool:set_metadata(minetest.serialize(meta)) -- Save it
-				minetest.chat_send_player(pname, S("Aquired node at %s for teleport"):format(minetest.pos_to_string(pos)))
+				if not minetest.is_protected(pos, pname) then
+					meta.save_block = pos -- Store the pos table
+					tool:set_metadata(minetest.serialize(meta)) -- Save it
+					minetest.chat_send_player(pname, S("Aquired node at %s for teleport"):format(minetest.pos_to_string(pos)))
+				else
+					minetest.log("action", S("Player '%s' tried to move block %s by means of shifter_tool:shifter_teleport"):format(pname, minetest.pos_to_string(pos)))
+					minetest.chat_send_player(pname, S("Node at %s can't be teleported."):format(minetest.pos_to_string(pos)))
+				end
 				return false
 			else
-				minetest.chat_send_player(pname, S("Old location is unloaded, get closer."))
+				minetest.chat_send_player(pname, S("Old location at %s is unloaded, get closer."):format(minetest.pos_to_string(pos)))
 				return false
 			end
 		else
@@ -106,16 +111,21 @@ local function shift_node(pos, move_dir, user, tool)
 			if old ~= nil then
 				local new = pos -- Correct the final destination by adding 1 to the y
  				new.y = new.y + 1 -- WARNING: If the player places it on the bottom of a roof it will replace roof!
-				minetest.add_node(new, old)
-				local new_node = minetest.get_meta(new)
-				new_node:from_table(old_meta)
-				minetest.remove_node(meta.save_block)
-				minetest.chat_send_player(pname, S("Teleported!"))
-				meta.save_block = nil -- Reset the teleport
-				tool:set_metadata(minetest.serialize(meta)) -- Save it
-				return true
+				if not minetest.is_protected(pos, pname) and not minetest.is_protected(new, pname) or minetest.check_player_privs(pname, {server = true}) or minetest.check_player_privs(pname, {protection_bypass = true}) then
+					minetest.add_node(new, old)
+					local new_node = minetest.get_meta(new)
+					new_node:from_table(old_meta)
+					minetest.remove_node(meta.save_block)
+					minetest.chat_send_player(pname, S("Teleported %s to %s."):format(minetest.pos_to_string(meta.save_block), minetest.pos_to_string(new)))
+					meta.save_block = nil -- Reset the teleport
+					tool:set_metadata(minetest.serialize(meta)) -- Save it
+					return true
+				else
+					minetest.log("action", S("Player '%s' tried to move block %s to %s by means of shifter_tool:shifter_teleport"):format(pname, minetest.pos_to_string(meta.save_block), minetest.pos_to_string(new)))
+					minetest.chat_send_player(pname, S("Node at %s can't be teleported to %s."):format(minetest.pos_to_string(meta.save_block), minetest.pos_to_string(new)))
+				end
 			else
-				minetest.chat_send_player(pname, S("Old location is unloaded, get closer."))
+				minetest.chat_send_player(pname, S("Old location at %s is unloaded, get closer."):format(minetest.pos_to_string(meta.save_block)))
 				return false
 			end
 		end
