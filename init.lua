@@ -41,11 +41,21 @@ local function object_is_player(object)
 	return vector.equals(object_pos, player_pos)
 end
 
+local function pre_check(item)
+	local meta = minetest.deserialize(item:get_metadata())
+	if meta == nil then
+		meta = {}
+		meta.save_block = nil
+		meta.shift_mode = DEFAULT_MODE
+	end
+	return meta
+end
+
 -- Tries to shift the node at the position in the direction for the user. The
 -- direction should be one unit long and parallel to an axis. The user will be
 -- messaged if the shift didn't occur. The return value is whether it did.
 local function shift_node(pos, move_dir, user, tool)
-	local meta = minetest.deserialize(tool:get_metadata())
+	local meta = pre_check(tool)
 	if meta.shift_mode == "shift" then -- Normal shift operation
 		local name = user and user:get_player_name() or ""
 		-- Whether or not the user is a real player:
@@ -57,7 +67,7 @@ local function shift_node(pos, move_dir, user, tool)
 					S("You cannot shift the node due to your " ..
 					"current position/orientation."))
 			end
-			return false
+			return {action=false, use=false}
 		end
 		-- The name changed to conform to the conventions of mvps_push:
 		local shifter_name = is_player and name or "$unknown"
@@ -85,7 +95,7 @@ local function shift_node(pos, move_dir, user, tool)
 					S("The node could not be shifted."))
 			end
 		end
-		return shifted
+		return {action=shifted, use=shifted}
 	elseif meta.shift_mode == "teleport" then
 		local pname = user:get_player_name()
 		if meta.save_block == nil then
@@ -99,10 +109,10 @@ local function shift_node(pos, move_dir, user, tool)
 					minetest.log("action", S("Player '%s' tried to move block %s by means of shifter_tool:shifter_teleport"):format(pname, minetest.pos_to_string(pos)))
 					minetest.chat_send_player(pname, S("Node at %s can't be teleported."):format(minetest.pos_to_string(pos)))
 				end
-				return false
+				return {action=true, use=false}
 			else
 				minetest.chat_send_player(pname, S("Old location at %s is unloaded, get closer."):format(minetest.pos_to_string(pos)))
-				return false
+				return {action=false, use=false}
 			end
 		else
 			local old = minetest.get_node_or_nil(meta.save_block)
@@ -111,26 +121,26 @@ local function shift_node(pos, move_dir, user, tool)
 			if old ~= nil then
 				local new = pos -- Correct the final destination by adding 1 to the y
  				new.y = new.y + 1 -- WARNING: If the player places it on the bottom of a roof it will replace roof!
-				if not minetest.is_protected(pos, pname) and not minetest.is_protected(new, pname) or minetest.check_player_privs(pname, {server = true}) or minetest.check_player_privs(pname, {protection_bypass = true}) then
+				if not minetest.is_protected(meta.save_block, pname) and not minetest.is_protected(new, pname) or minetest.check_player_privs(pname, {server = true}) or minetest.check_player_privs(pname, {protection_bypass = true}) then
+					minetest.remove_node(meta.save_block)
 					minetest.add_node(new, old)
 					local new_node = minetest.get_meta(new)
 					new_node:from_table(old_meta)
-					minetest.remove_node(meta.save_block)
 					minetest.chat_send_player(pname, S("Teleported %s to %s."):format(minetest.pos_to_string(meta.save_block), minetest.pos_to_string(new)))
 					meta.save_block = nil -- Reset the teleport
 					tool:set_metadata(minetest.serialize(meta)) -- Save it
-					return true
+					return {action=true, use=true}
 				else
 					minetest.log("action", S("Player '%s' tried to move block %s to %s by means of shifter_tool:shifter_teleport"):format(pname, minetest.pos_to_string(meta.save_block), minetest.pos_to_string(new)))
 					minetest.chat_send_player(pname, S("Node at %s can't be teleported to %s."):format(minetest.pos_to_string(meta.save_block), minetest.pos_to_string(new)))
 				end
 			else
 				minetest.chat_send_player(pname, S("Old location at %s is unloaded, get closer."):format(minetest.pos_to_string(meta.save_block)))
-				return false
+				return {action=false, use=false}
 			end
 		end
 	end
-	return false
+	return {action=false, use=false}
 end
 
 -- Do the interaction. If reverse is true, the action pulling (otherwise it's
@@ -141,25 +151,18 @@ local function interact(tool, user, pointed_thing, reverse)
 		local name = user and user:get_player_name() or ""
 		local use_pos = pointed_thing.under
 		local move_dir = vector.subtract(use_pos, pointed_thing.above)
-		local meta = minetest.deserialize(tool:get_metadata())
-		if meta == nil then
-			meta = {}
-			meta_updated = true
-		end
-		if meta.shift_mode == nil then
-			meta.shift_mode = DEFAULT_MODE
-			meta_updated = true
-		end
+		local meta = pre_check(tool)
 		if reverse then move_dir = vector.multiply(move_dir, -1) end
-		if shift_node(use_pos, move_dir, user, tool) then
+		local op = shift_node(use_pos, move_dir, user, tool)
+		if op.action then
 			local sound = reverse and "shifter_tool_pull" or
 				"shifter_tool_push"
 			minetest.sound_play(sound, {
 				pos = use_pos,
 				gain = 0.2,
 			}, true)
-			-- Only remove wear if not in creative, and not the server owner
-			if not minetest.is_creative_enabled(name) and not minetest.check_player_privs(name, {server = true}) then
+			-- Only remove wear if not in creative
+			if not minetest.is_creative_enabled(name) and op.use then
 				tool:add_wear(WEAR_PER_USE)
 			end
 		end
@@ -172,11 +175,7 @@ end
 
 local function tool_setmode(user, tool)
 	local pname = user:get_player_name()
-	local meta = minetest.deserialize(tool:get_metadata())
-	if meta == nil then
-		meta = {}
-		meta.save_block = nil -- Initialize the node we have stored as nil
-	end	
+	local meta = pre_check(tool)
 	if meta.shift_mode == nil then
 		meta.shift_mode = DEFAULT_MODE
 	elseif meta.shift_mode == "shift" then
